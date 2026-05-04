@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>機車 G 力遙測器</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: #1a1a1a;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: sans-serif;
+      overflow: hidden;
+    }
+    #dashboard {
+      position: relative;
+      width: 320px;
+      height: 320px;
+    }
+    canvas {
+      background-color: #2a2a2a;
+      border-radius: 50%;
+      box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+    }
+    #startBtn {
+      padding: 15px 30px;
+      font-size: 18px;
+      border: none;
+      border-radius: 8px;
+      background-color: #007bff;
+      color: white;
+      margin-bottom: 30px;
+      cursor: pointer;
+    }
+    .info {
+      margin-top: 20px;
+      font-family: monospace;
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <button id="startBtn">啟動感測器 (Start)</button>
+  
+  <div id="dashboard">
+    <canvas id="gForceCanvas" width="320" height="320"></canvas>
+  </div>
+
+  <div class="info">
+    Lat G (X): <span id="xVal">0.00</span> G<br>
+    Lon G (Y): <span id="yVal">0.00</span> G
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gForceCanvas');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const xVal = document.getElementById('xVal');
+    const yVal = document.getElementById('yVal');
+
+    const center = { x: canvas.width / 2, y: canvas.height / 2 };
+    const maxG = 1.5; // 設定圓盤邊緣為 1.5G
+    const gToMs2 = 9.81; // 1G = 9.81 m/s^2
+    const scale = (canvas.width / 2) / (maxG * gToMs2); // 將加速度轉換為螢幕像素比例
+
+    let currentX = 0;
+    let currentY = 0;
+    
+    // 一階低通濾波器參數 (0 ~ 1)，越小越平滑但延遲越高
+    const alpha = 0.15; 
+
+    function drawBackground() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // 畫十字刻度線
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(center.x, 0); ctx.lineTo(center.x, canvas.height);
+      ctx.moveTo(0, center.y); ctx.lineTo(canvas.width, center.y);
+      ctx.stroke();
+
+      // 畫 0.5G, 1.0G, 1.5G 同心圓
+      const gLevels = [0.5, 1.0, 1.5];
+      gLevels.forEach(g => {
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, g * gToMs2 * scale, 0, 2 * Math.PI);
+        ctx.strokeStyle = '#777';
+        ctx.stroke();
+        
+        ctx.fillStyle = '#aaa';
+        ctx.font = '12px sans-serif';
+        ctx.fillText(g.toFixed(1) + 'G', center.x + 5, center.y - (g * gToMs2 * scale) + 15);
+      });
+    }
+
+    function drawDot(accX, accY) {
+      drawBackground();
+
+      // 根據手機方向調整 X Y 軸符號（可能需依據你車上支架的方向調整正負號）
+      // 手機直立時：X軸向右為正，Y軸向上為正
+      let plotX = center.x - (accX * scale); 
+      let plotY = center.y + (accY * scale);
+
+      // 畫紅點
+      ctx.fillStyle = '#ff3b30';
+      ctx.beginPath();
+      ctx.arc(plotX, plotY, 12, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // 添加光暈效果
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = 'red';
+    }
+
+    function handleMotion(event) {
+      // event.acceleration 提供扣除重力後的「線性加速度」
+      let acc = event.acceleration;
+      if (!acc.x) return; // 確保硬體有回傳數據
+
+      // 實作低通濾波器（Low-pass filter）消除引擎震動高頻雜訊
+      currentX = currentX + alpha * (acc.x - currentX);
+      currentY = currentY + alpha * (acc.y - currentY);
+
+      drawDot(currentX, currentY);
+
+      // 更新下方數值顯示 (轉換回 G 力單位)
+      xVal.innerText = (currentX / gToMs2).toFixed(2);
+      yVal.innerText = (currentY / gToMs2).toFixed(2);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      // 處理 iOS 13+ 需要使用者點擊授權感測器的機制
+      if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        try {
+          const permission = await DeviceMotionEvent.requestPermission();
+          if (permission === 'granted') {
+            window.addEventListener('devicemotion', handleMotion);
+            startBtn.style.display = 'none';
+          } else {
+            alert('需要動作感測器權限才能顯示 G 力！');
+          }
+        } catch (error) {
+          console.error(error);
+          alert('請確保網頁使用 HTTPS 連線。');
+        }
+      } else {
+        // 非 iOS 或舊版裝置直接監聽
+        window.addEventListener('devicemotion', handleMotion);
+        startBtn.style.display = 'none';
+      }
+    });
+
+    // 初始化背景
+    drawBackground();
+  </script>
+</body>
+</html>
