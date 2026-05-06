@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>機車 G 力遙測器 (帶數據記錄)</title>
+  <title>機車 G 力遙測器 (帶數據記錄與結束功能)</title>
   <style>
     body {
       margin: 0;
@@ -48,12 +48,16 @@
       border-radius: 8px;
       color: white;
       cursor: pointer;
-      background-color: #28a745; /* 預設綠色 */
+      background-color: #28a745; 
       transition: background-color 0.3s;
     }
     .recording {
-      background-color: #dc3545 !important; /* 錄製中變紅色 */
+      background-color: #dc3545 !important; 
       animation: pulse 1.5s infinite;
+    }
+    .end-btn {
+      background-color: #6c757d; /* 灰色結束按鈕 */
+      margin-left: 10px;
     }
     @keyframes pulse {
       0% { transform: scale(1); }
@@ -80,7 +84,8 @@
   <button id="startBtn">啟動感測器 (Start)</button>
   
   <div id="controls">
-    <button id="recordBtn" class="action-btn">開始記錄 (Record)</button>
+    <button id="recordBtn" class="action-btn">開始記錄</button>
+    <button id="endBtn" class="action-btn end-btn">結束感測</button>
   </div>
   
   <div id="dashboard">
@@ -99,20 +104,20 @@
     const startBtn = document.getElementById('startBtn');
     const controls = document.getElementById('controls');
     const recordBtn = document.getElementById('recordBtn');
+    const endBtn = document.getElementById('endBtn');
     const xVal = document.getElementById('xVal');
     const yVal = document.getElementById('yVal');
     const recordStatus = document.getElementById('recordStatus');
 
     const center = { x: canvas.width / 2, y: canvas.height / 2 };
-    const maxG = 1.2; // 調整圓盤邊緣為 1.2G
+    const maxG = 1.2; 
     const gToMs2 = 9.81; 
     const scale = (canvas.width / 2) / (maxG * gToMs2); 
 
     let currentX = 0;
     let currentY = 0;
-    const alpha = 0.15; // 低通濾波參數
+    const alpha = 0.15; 
 
-    // === 數據記錄相關變數 ===
     let isRecording = false;
     let telemetryData = [];
     let startTime = 0;
@@ -128,7 +133,6 @@
       ctx.moveTo(0, center.y); ctx.lineTo(canvas.width, center.y);
       ctx.stroke();
 
-      // 畫 0.4G, 0.8G, 1.2G 同心圓
       const gLevels = [0.4, 0.8, 1.2];
       gLevels.forEach(g => {
         ctx.beginPath();
@@ -148,7 +152,7 @@
       let plotX = center.x - (accX * scale); 
       let plotY = center.y + (accY * scale);
 
-      ctx.fillStyle = isRecording ? '#00ffcc' : '#ff3b30'; // 錄製時亮青色，平常紅色
+      ctx.fillStyle = isRecording ? '#00ffcc' : '#ff3b30'; 
       ctx.beginPath();
       ctx.arc(plotX, plotY, 12, 0, 2 * Math.PI);
       ctx.fill();
@@ -161,7 +165,6 @@
       let acc = event.acceleration;
       if (!acc.x) return; 
 
-      // 濾波處理
       currentX = currentX + alpha * (acc.x - currentX);
       currentY = currentY + alpha * (acc.y - currentY);
 
@@ -173,7 +176,6 @@
       xVal.innerText = gX;
       yVal.innerText = gY;
 
-      // === 記錄數據邏輯 ===
       if (isRecording) {
         const timeElapsed = Date.now() - startTime;
         const rawGX = (acc.x / gToMs2).toFixed(4);
@@ -181,18 +183,15 @@
         const filteredGX = (currentX / gToMs2).toFixed(4);
         const filteredGY = (currentY / gToMs2).toFixed(4);
         
-        // 儲存格式: 時間(ms), 原始X, 原始Y, 濾波X, 濾波Y
         telemetryData.push([timeElapsed, rawGX, rawGY, filteredGX, filteredGY]);
         dataCount++;
         
-        // 每 10 筆數據更新一次 UI，避免拖慢效能
         if (dataCount % 10 === 0) {
             recordStatus.innerText = `🔴 錄製中... 已記錄 ${dataCount} 筆數據`;
         }
       }
     }
 
-    // === 匯出 CSV 檔案邏輯 ===
     function exportCSV() {
       if (telemetryData.length === 0) return;
 
@@ -201,44 +200,65 @@
         csvContent += row.join(",") + "\n";
       });
 
-      // 加上 BOM (0xEF, 0xBB, 0xBF) 讓 Excel 也能正確識別 UTF-8
       const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       
       const link = document.createElement("a");
       link.setAttribute("href", url);
-      // 檔名加上時間戳記避免覆蓋
       link.setAttribute("download", `telemetry_${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.csv`);
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url); // 釋放記憶體
+      URL.revokeObjectURL(url); 
       
       recordStatus.innerText = `✅ 已下載 ${dataCount} 筆數據！`;
     }
 
-    // === 按鈕事件監聽 ===
+    // === 開始/停止錄製 ===
     recordBtn.addEventListener('click', () => {
       if (!isRecording) {
-        // 開始記錄
         isRecording = true;
         telemetryData = [];
         dataCount = 0;
         startTime = Date.now();
         
-        recordBtn.innerText = '停止並儲存 (Stop & Save)';
+        recordBtn.innerText = '停止並儲存';
         recordBtn.classList.add('recording');
       } else {
-        // 停止記錄並匯出
         isRecording = false;
-        recordBtn.innerText = '開始記錄 (Record)';
+        recordBtn.innerText = '開始記錄';
         recordBtn.classList.remove('recording');
         
         exportCSV();
       }
     });
 
+    // === 結束感測 ===
+    endBtn.addEventListener('click', () => {
+      // 1. 如果正在錄製中，先自動儲存
+      if (isRecording) {
+        recordBtn.click(); // 模擬點擊儲存按鈕
+      }
+      
+      // 2. 移除感測器監聽，停止運算
+      window.removeEventListener('devicemotion', handleMotion);
+      
+      // 3. UI 重置
+      controls.style.display = 'none';
+      startBtn.style.display = 'block';
+      
+      // 4. 座標歸零
+      currentX = 0;
+      currentY = 0;
+      xVal.innerText = '0.00';
+      yVal.innerText = '0.00';
+      drawBackground(); // 只畫背景，紅點消失
+      
+      recordStatus.innerText = '🛑 感測器已關閉。';
+    });
+
+    // === 啟動感測 ===
     startBtn.addEventListener('click', async () => {
       if (typeof DeviceMotionEvent.requestPermission === 'function') {
         try {
@@ -246,7 +266,8 @@
           if (permission === 'granted') {
             window.addEventListener('devicemotion', handleMotion);
             startBtn.style.display = 'none';
-            controls.style.display = 'block'; // 顯示記錄按鈕
+            controls.style.display = 'block'; 
+            recordStatus.innerText = '✅ 感測器運作中';
           } else {
             alert('需要動作感測器權限才能顯示 G 力！');
           }
@@ -257,7 +278,8 @@
       } else {
         window.addEventListener('devicemotion', handleMotion);
         startBtn.style.display = 'none';
-        controls.style.display = 'block'; // 顯示記錄按鈕
+        controls.style.display = 'block'; 
+        recordStatus.innerText = '✅ 感測器運作中';
       }
     });
 
