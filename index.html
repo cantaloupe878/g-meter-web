@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>機車 G 力遙測器 (帶數據記錄與結束功能)</title>
+  <title>機車遙測器 (G力 + GPS 軌跡)</title>
   <style>
     body {
       margin: 0;
@@ -56,7 +56,7 @@
       animation: pulse 1.5s infinite;
     }
     .end-btn {
-      background-color: #6c757d; /* 灰色結束按鈕 */
+      background-color: #6c757d; 
       margin-left: 10px;
     }
     @keyframes pulse {
@@ -71,17 +71,22 @@
       text-align: center;
       line-height: 1.5;
     }
+    #gpsStatus {
+      color: #0dcaf0;
+      font-size: 14px;
+      margin-top: 10px;
+    }
     #recordStatus {
       color: #ffc107;
       font-size: 14px;
-      margin-top: 10px;
+      margin-top: 5px;
       min-height: 20px;
     }
   </style>
 </head>
 <body>
 
-  <button id="startBtn">啟動感測器 (Start)</button>
+  <button id="startBtn">啟動系統 (Start)</button>
   
   <div id="controls">
     <button id="recordBtn" class="action-btn">開始記錄</button>
@@ -95,6 +100,7 @@
   <div class="info">
     Lat G (X): <span id="xVal">0.00</span> G<br>
     Lon G (Y): <span id="yVal">0.00</span> G
+    <div id="gpsStatus">🛰️ GPS: 尚未啟動</div>
     <div id="recordStatus"></div>
   </div>
 
@@ -107,6 +113,7 @@
     const endBtn = document.getElementById('endBtn');
     const xVal = document.getElementById('xVal');
     const yVal = document.getElementById('yVal');
+    const gpsStatus = document.getElementById('gpsStatus');
     const recordStatus = document.getElementById('recordStatus');
 
     const center = { x: canvas.width / 2, y: canvas.height / 2 };
@@ -118,14 +125,20 @@
     let currentY = 0;
     const alpha = 0.15; 
 
+    // 數據記錄變數
     let isRecording = false;
     let telemetryData = [];
     let startTime = 0;
     let dataCount = 0;
 
+    // GPS 變數
+    let watchId = null;
+    let currLat = 0.000000;
+    let currLon = 0.000000;
+    let currSpeed = 0.0; // 單位: m/s
+
     function drawBackground() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
       ctx.strokeStyle = '#555';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -139,7 +152,6 @@
         ctx.arc(center.x, center.y, g * gToMs2 * scale, 0, 2 * Math.PI);
         ctx.strokeStyle = '#777';
         ctx.stroke();
-        
         ctx.fillStyle = '#aaa';
         ctx.font = '12px sans-serif';
         ctx.fillText(g.toFixed(1) + 'G', center.x + 5, center.y - (g * gToMs2 * scale) + 15);
@@ -148,19 +160,51 @@
 
     function drawDot(accX, accY) {
       drawBackground();
-
       let plotX = center.x - (accX * scale); 
       let plotY = center.y + (accY * scale);
-
       ctx.fillStyle = isRecording ? '#00ffcc' : '#ff3b30'; 
       ctx.beginPath();
       ctx.arc(plotX, plotY, 12, 0, 2 * Math.PI);
       ctx.fill();
-
       ctx.shadowBlur = 10;
       ctx.shadowColor = isRecording ? '#00ffcc' : 'red';
     }
 
+    // === GPS 啟動與追蹤 ===
+    function startGPS() {
+      if ("geolocation" in navigator) {
+        gpsStatus.innerText = '🛰️ GPS: 定位中...';
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            currLat = position.coords.latitude;
+            currLon = position.coords.longitude;
+            currSpeed = position.coords.speed || 0; // 若裝置不支援速度則補 0
+            gpsStatus.innerText = `🛰️ GPS: 定位成功 (誤差 ${position.coords.accuracy.toFixed(0)}m)`;
+          },
+          (error) => {
+            console.warn("GPS Error: ", error);
+            gpsStatus.innerText = '🛰️ GPS: 無法獲取訊號';
+          },
+          {
+            enableHighAccuracy: true, // 強制開啟高精度 GPS (非常重要)
+            maximumAge: 0,
+            timeout: 5000
+          }
+        );
+      } else {
+        gpsStatus.innerText = '🛰️ GPS: 你的瀏覽器不支援';
+      }
+    }
+
+    function stopGPS() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      gpsStatus.innerText = '🛰️ GPS: 已關閉';
+    }
+
+    // === G 力與數據整併 ===
     function handleMotion(event) {
       let acc = event.acceleration;
       if (!acc.x) return; 
@@ -170,116 +214,109 @@
 
       drawDot(currentX, currentY);
 
-      let gX = (currentX / gToMs2).toFixed(2);
-      let gY = (currentY / gToMs2).toFixed(2);
-
-      xVal.innerText = gX;
-      yVal.innerText = gY;
+      xVal.innerText = (currentX / gToMs2).toFixed(2);
+      yVal.innerText = (currentY / gToMs2).toFixed(2);
 
       if (isRecording) {
         const timeElapsed = Date.now() - startTime;
-        const rawGX = (acc.x / gToMs2).toFixed(4);
-        const rawGY = (acc.y / gToMs2).toFixed(4);
         const filteredGX = (currentX / gToMs2).toFixed(4);
         const filteredGY = (currentY / gToMs2).toFixed(4);
         
-        telemetryData.push([timeElapsed, rawGX, rawGY, filteredGX, filteredGY]);
-        dataCount++;
+        // 將最新抓到的 GPS 座標跟速度一起塞進陣列
+        telemetryData.push([
+          timeElapsed, 
+          filteredGX, 
+          filteredGY, 
+          currLat.toFixed(6), 
+          currLon.toFixed(6), 
+          currSpeed.toFixed(2)
+        ]);
         
+        dataCount++;
         if (dataCount % 10 === 0) {
             recordStatus.innerText = `🔴 錄製中... 已記錄 ${dataCount} 筆數據`;
         }
       }
     }
 
+    // === 匯出 CSV ===
     function exportCSV() {
       if (telemetryData.length === 0) return;
 
-      let csvContent = "Time(ms),Raw_X(G),Raw_Y(G),Filtered_X(G),Filtered_Y(G)\n";
+      // 新增了 Latitude, Longitude, Speed 欄位
+      let csvContent = "Time(ms),G_X(G),G_Y(G),Latitude,Longitude,Speed(m/s)\n";
       telemetryData.forEach(row => {
         csvContent += row.join(",") + "\n";
       });
 
       const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
-      
       const link = document.createElement("a");
       link.setAttribute("href", url);
-      link.setAttribute("download", `telemetry_${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.csv`);
-      
+      link.setAttribute("download", `telemetry_gps_${new Date().toISOString().slice(0,19).replace(/:/g,"-")}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url); 
       
-      recordStatus.innerText = `✅ 已下載 ${dataCount} 筆數據！`;
+      recordStatus.innerText = `✅ 已下載 ${dataCount} 筆包含 GPS 的數據！`;
     }
 
-    // === 開始/停止錄製 ===
+    // === 按鈕事件 ===
     recordBtn.addEventListener('click', () => {
       if (!isRecording) {
         isRecording = true;
         telemetryData = [];
         dataCount = 0;
         startTime = Date.now();
-        
         recordBtn.innerText = '停止並儲存';
         recordBtn.classList.add('recording');
       } else {
         isRecording = false;
         recordBtn.innerText = '開始記錄';
         recordBtn.classList.remove('recording');
-        
         exportCSV();
       }
     });
 
-    // === 結束感測 ===
     endBtn.addEventListener('click', () => {
-      // 1. 如果正在錄製中，先自動儲存
       if (isRecording) {
-        recordBtn.click(); // 模擬點擊儲存按鈕
+        recordBtn.click(); 
       }
-      
-      // 2. 移除感測器監聽，停止運算
       window.removeEventListener('devicemotion', handleMotion);
+      stopGPS(); // 關閉 GPS 停止耗電
       
-      // 3. UI 重置
       controls.style.display = 'none';
       startBtn.style.display = 'block';
       
-      // 4. 座標歸零
       currentX = 0;
       currentY = 0;
       xVal.innerText = '0.00';
       yVal.innerText = '0.00';
-      drawBackground(); // 只畫背景，紅點消失
+      drawBackground(); 
       
-      recordStatus.innerText = '🛑 感測器已關閉。';
+      recordStatus.innerText = '🛑 系統已關閉。';
     });
 
-    // === 啟動感測 ===
     startBtn.addEventListener('click', async () => {
-      if (typeof DeviceMotionEvent.requestPermission === 'function') {
-        try {
+      try {
+        if (typeof DeviceMotionEvent.requestPermission === 'function') {
           const permission = await DeviceMotionEvent.requestPermission();
-          if (permission === 'granted') {
-            window.addEventListener('devicemotion', handleMotion);
-            startBtn.style.display = 'none';
-            controls.style.display = 'block'; 
-            recordStatus.innerText = '✅ 感測器運作中';
-          } else {
+          if (permission !== 'granted') {
             alert('需要動作感測器權限才能顯示 G 力！');
+            return;
           }
-        } catch (error) {
-          console.error(error);
-          alert('請確保網頁使用 HTTPS 連線。');
         }
-      } else {
+        
         window.addEventListener('devicemotion', handleMotion);
+        startGPS(); // 啟動加速度計的同時，開啟 GPS
+        
         startBtn.style.display = 'none';
         controls.style.display = 'block'; 
         recordStatus.innerText = '✅ 感測器運作中';
+      } catch (error) {
+        console.error(error);
+        alert('請確保網頁使用 HTTPS 連線。');
       }
     });
 
