@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>機車遙測器 (G力 + GPS 軌跡)</title>
+  <title>機車遙測器 (直立版 + GPS + 數據記錄)</title>
   <style>
     body {
       margin: 0;
@@ -98,8 +98,8 @@
   </div>
 
   <div class="info">
-    Lat G (X): <span id="xVal">0.00</span> G<br>
-    Lon G (Y): <span id="yVal">0.00</span> G
+    Lat G (橫向): <span id="xVal">0.00</span> G<br>
+    Lon G (縱向): <span id="yVal">0.00</span> G
     <div id="gpsStatus">🛰️ GPS: 尚未啟動</div>
     <div id="recordStatus"></div>
   </div>
@@ -123,7 +123,7 @@
 
     let currentX = 0;
     let currentY = 0;
-    const alpha = 0.15; 
+    const alpha = 0.15; // 濾波器參數
 
     // 數據記錄變數
     let isRecording = false;
@@ -135,8 +135,9 @@
     let watchId = null;
     let currLat = 0.000000;
     let currLon = 0.000000;
-    let currSpeed = 0.0; // 單位: m/s
+    let currSpeed = 0.0; 
 
+    // === 繪製背景 ===
     function drawBackground() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.strokeStyle = '#555';
@@ -158,10 +159,16 @@
       });
     }
 
+    // === 繪製 G 力點 ===
     function drawDot(accX, accY) {
       drawBackground();
-      let plotX = center.x - (accX * scale); 
-      let plotY = center.y + (accY * scale);
+      
+      // Canvas 座標轉換：
+      // accX 為正 (向右)，紅點往右 (center.x + ...)
+      // accY 為正 (向前)，紅點往上 (center.y - ...)
+      let plotX = center.x + (accX * scale); 
+      let plotY = center.y - (accY * scale);
+      
       ctx.fillStyle = isRecording ? '#00ffcc' : '#ff3b30'; 
       ctx.beginPath();
       ctx.arc(plotX, plotY, 12, 0, 2 * Math.PI);
@@ -178,7 +185,7 @@
           (position) => {
             currLat = position.coords.latitude;
             currLon = position.coords.longitude;
-            currSpeed = position.coords.speed || 0; // 若裝置不支援速度則補 0
+            currSpeed = position.coords.speed || 0; 
             gpsStatus.innerText = `🛰️ GPS: 定位成功 (誤差 ${position.coords.accuracy.toFixed(0)}m)`;
           },
           (error) => {
@@ -186,7 +193,7 @@
             gpsStatus.innerText = '🛰️ GPS: 無法獲取訊號';
           },
           {
-            enableHighAccuracy: true, // 強制開啟高精度 GPS (非常重要)
+            enableHighAccuracy: true, 
             maximumAge: 0,
             timeout: 5000
           }
@@ -204,25 +211,33 @@
       gpsStatus.innerText = '🛰️ GPS: 已關閉';
     }
 
-    // === G 力與數據整併 ===
+    // === G 力獲取與數據整併 ===
     function handleMotion(event) {
       let acc = event.acceleration;
-      if (!acc.x) return; 
+      // 確保硬體有回傳數據 (同時檢查 X 與 Z)
+      if (acc.x === null || acc.z === null) return; 
 
-      currentX = currentX + alpha * (acc.x - currentX);
-      currentY = currentY + alpha * (acc.y - currentY);
+      // 座標軸轉換 (手機直立，螢幕面對騎士)
+      // 機車左右 = 手機 X 軸
+      // 機車前後 = 手機 Z 軸 (螢幕朝騎士時，往前加速 Z 為負值)
+      let rawX = acc.x;
+      let rawY = -acc.z; 
+
+      // 低通濾波處理
+      currentX = currentX + alpha * (rawX - currentX);
+      currentY = currentY + alpha * (rawY - currentY);
 
       drawDot(currentX, currentY);
 
       xVal.innerText = (currentX / gToMs2).toFixed(2);
       yVal.innerText = (currentY / gToMs2).toFixed(2);
 
+      // 記錄數據
       if (isRecording) {
         const timeElapsed = Date.now() - startTime;
         const filteredGX = (currentX / gToMs2).toFixed(4);
         const filteredGY = (currentY / gToMs2).toFixed(4);
         
-        // 將最新抓到的 GPS 座標跟速度一起塞進陣列
         telemetryData.push([
           timeElapsed, 
           filteredGX, 
@@ -243,7 +258,6 @@
     function exportCSV() {
       if (telemetryData.length === 0) return;
 
-      // 新增了 Latitude, Longitude, Speed 欄位
       let csvContent = "Time(ms),G_X(G),G_Y(G),Latitude,Longitude,Speed(m/s)\n";
       telemetryData.forEach(row => {
         csvContent += row.join(",") + "\n";
@@ -284,7 +298,7 @@
         recordBtn.click(); 
       }
       window.removeEventListener('devicemotion', handleMotion);
-      stopGPS(); // 關閉 GPS 停止耗電
+      stopGPS(); 
       
       controls.style.display = 'none';
       startBtn.style.display = 'block';
@@ -309,7 +323,7 @@
         }
         
         window.addEventListener('devicemotion', handleMotion);
-        startGPS(); // 啟動加速度計的同時，開啟 GPS
+        startGPS(); 
         
         startBtn.style.display = 'none';
         controls.style.display = 'block'; 
